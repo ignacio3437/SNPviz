@@ -8,6 +8,7 @@ import sh
 import shlex
 import shutil
 import subprocess
+from distruct import distructor
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,19 +35,20 @@ SNPViz, an automated workflow that:
 
 
 ##############################Set Up##############################
-pwd = "/Users/josec/Desktop/So/"  # Location of VCF file and Metadata File
-basename = "Nov_So"  # Base name of VCF file. (Eg. Sy.vcf basename = "Sy")
-datafile = "So_dat.txt"  # Name of the Metadata.txt in TSV format
-metagroup = "Group"  # Name of column in Metadata.txt file to group sample by
+pwd = "/Users/josec/Desktop/Datasets/skrad/skrad2/SNPViz_sub/"  # Location of VCF file and Metadata File. End in '/'
+basename = "sub80"  # Base name of VCF file. (Eg. Sy.vcf basename = "Sy")
+datafile = "skrad2.txt"  # Name of the Metadata.txt in TSV format
+metagroup = "CytBSnpvizID"  # Name of column in Metadata.txt file to group sample by
 k = 10  # Number of Ks to run the Admixture analysis
 bs = 10  # Number of bootstraps for RaxML analysis
-taxon_cov = 0.8  # If a locus percent missing data is below this number, it will be thrown out
-threads = 7 # Number of cores to run the analysis
+# taxon_cov = 0.1  # If a locus percent missing data is below this number, it will be thrown out
+threads = 2 # Number of cores to run the analysis
 mapbuffer = 5  # Lat/Lon buffer to zoom out of box containing geographic distribution of samples
 pretty_figures = False  # Set quality of output files 'high'=TRUE 'low'=FALSE
 outlierbutton = ""  # Add "outliersigmathresh: 7" if you want more outliers, set to "" if you want outliers removed
 maf = 0.05 # Set minor allele frequency cutoff
-mind = 0.98 # Loci with less than this percent of taxon coverage are removed
+mind = 0.95 # Individuals with less than this percent of incomplete data are removed
+geno = 0.95 # Loci with less than this percent of incomplete data are removed
 sns_context = 'talk' # Set the size of the axis. See for more info: https://seaborn.pydata.org/tutorial/aesthetics.html#scaling-plot-elements
 fig_title  = True # Set if there should be figure titles. 
 ##################################################################
@@ -59,10 +61,10 @@ baseo = f'{basename}_o'
 basepath = f'{pwd+basename}'
 pcafile = f'{basepath}.evec'
 admixoutdir = f'{pwd}admixture/'
-admix_colorpalette_list = sns.color_palette('Accent', 8).as_hex()
+admix_colorpalette_list = sns.color_palette("cubehelix", 15).as_hex()
 # colorpalette_list = sns.color_palette('Set1', 8).as_hex()
-colorpalette_list = ['#0021f5','#ffe900','#eb3324','#57b03d']
-# colorpalette_list = ['#ebf0f4', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628', '#f781bf', '#999999', '#e41a1c', '#d12e8d', '#252728']
+# colorpalette_list = ['#0021f5','#ffe900','#eb3324','#57b03d']
+colorpalette_list = ['#ebf0f4', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628', '#f781bf', '#999999', '#e41a1c', '#d12e8d', '#252728', '#fc8d59']
 # Make high quality figures?
 if pretty_figures:
     dpi, xpix, imgformat = 1200, 3000, '.svg'
@@ -71,19 +73,22 @@ else:
 
 
 def vcf_to_plink(baseo):
-    # hanges from the VCF output from pyrad to a plink file that has been cleaned up for LD and Taxon_coverate (missing data)
-    sh.vcftools(shlex.split(f"--vcf {basename}.vcf --max-missing {taxon_cov} --out {baseo} --plink"))
+    # Changes from the VCF output from pyrad to a plink file that has been cleaned up for LD and Taxon_coverate (missing data)
+    sh.vcftools(shlex.split(f"--vcf {basename}.vcf --out {basename} --plink"))
     # Replace first column of map file to 1 to avoid errors concening too many Chromosomes in plink.
     # Plink treats each locci as a chromosome with the way the map file is encoded. This sets all locci on Chrom1
     # This does not affect anything because we are not doing any chromosomal analysis. Just analyzing a SNP dataset.
     maphandle=f"{basename}_temp.map"
-    sh.awk("$1=1", f"{baseo}.map", _out=maphandle)
-    sh.mv(f"{basename}_temp.map",f"{baseo}.map")
+    sh.awk("$1=1", f"{basename}.map", _out=maphandle)
+    sh.mv(f"{basename}_temp.map",f"{basename}.map")
     # Prunes the dataset for LD with indep-pairwise
     # Removes locci with minimum allele freq of under 5% with maf. (ie removes fixed alleles)
-    sh.plink2(shlex.split(f"--file {baseo} --threads {threads} --indep-pairwise 50 10 0.1"))
+    sh.plink2(shlex.split(f"--file {basename} --threads {threads} --indep-pairwise 50 10 0.1"))
     #MAF minor allele freq and mind is percent missing data cutoff before individual is removed
-    sh.plink2(shlex.split(f"--file {baseo} --threads {threads} --extract plink.prune.in --recode --freq --maf {maf} --mind {mind} --out {basename}"))
+    # sh.plink2(shlex.split(f"--file {basename} --threads {threads} --extract plink.prune.in --mind {mind} --geno {geno} --maf {maf} --recode --out {baseo}"))
+    sh.plink2(shlex.split(f"--file {basename} --threads {threads} --extract plink.prune.in --mind {mind} --geno {geno} --recode --out {baseo}"))
+
+
     return
 
 
@@ -92,9 +97,9 @@ def PCAer():
     # Converts the eigenvalues to percent Variation for top axis. This axis will show percent variation for each PCA axis.
     with open(pwd + 'pca.par', 'w') as pca:
         pca.write(f"""
-    genotypename:    {basename}.ped
-    snpname:         {basename}.map
-    indivname:       {basename}.ped
+    genotypename:    {baseo}.ped
+    snpname:         {baseo}.map
+    indivname:       {baseo}.ped
     evecoutname:     {basename}.evec
     evaloutname:     {basename}.eval
     altnormstyle:    YES
@@ -170,7 +175,7 @@ def pca_plotter(df, colorby, colorpalette):
         data=datatable,
         hue=colorby,
         fit_reg=False,
-        legend=False,
+        legend=True,
         # legend_out=True,
         scatter_kws={"linewidths": .3,
                      'edgecolors': 'black',
@@ -241,14 +246,16 @@ def admix_runner(k):
     # CV is the cross validation error. The lowest CV value represents the best k.
     cvd = {}
     for ki in range(1, k + 1):
-        admixcommand = shlex.split(f"admixture -j{threads} -C=0.01 --cv {basename}.bed {ki}")
+        admixcommand = shlex.split(f"admixture -j{threads} -C=0.01 --cv=10 {basename}.bed {ki}")
         popen = subprocess.Popen(admixcommand, stdout=subprocess.PIPE, universal_newlines=True)
         with open(admixoutdir + "admixout.txt", 'a') as admixoutfile:
             admixoutfile.write(f"{'#'*10}K={ki}\n{'#'*10}\n")
             for stdout_line in iter(popen.stdout.readline, ""):
                 admixoutfile.write(stdout_line)
                 if "nan" in stdout_line:
-                    return
+                    cvd[ki] = 3
+                    break
+                    
                 elif "CV" in stdout_line:
                     cv = re.findall(r'CV .*K=(\d*).*: (\d*\.\d*)', stdout_line)
                     cvd[ki] = cv[0][1]
@@ -277,20 +284,17 @@ def admix_set_up(k):
     outlierfile = basename + "_outliersI.txt"
     with open(outlierfile, 'r') as outlierhandle:
         outlierlist = outlierhandle.readlines()
-    plink_string=f"--threads {threads} --file {basename}_o --make-bed --out {basename}"
     if len(outlierlist) > 0:
-        plink_string+= f" --remove {outlierfile}"
-        plink_command=shlex.split(plink_string)
+        plink_command=shlex.split(f"--threads {threads} --file {baseo} --remove {outlierfile} --make-bed --out {basename}")
         sh.plink2(plink_command)
-        plink_string2 = f"--bfile {basename} --recode --out {basename}"
-        plink_command2 = shlex.split(plink_string2)
-        sh.plink2(plink_command2)
 
     else:
-        plink_command=shlex.split(plink_string)
+        plink_command=shlex.split(f"--threads {threads} --file {baseo} --make-bed --out {basename}")
         sh.plink2(plink_command)
+    sh.plink2(shlex.split(f"--threads {threads} --bfile {basename} --make-bed --out {basename}"))
     # Run admixture for each k 1->"k". cvd=dictionary for CV values for each K of admixture.
     cvd = admix_runner(k)
+    print(cvd)
     # Pick lowest K based on CV error minimum
     lowestk = min(cvd, key=cvd.get)
     # Plot the CV results
@@ -392,12 +396,21 @@ def plot_admixture(lowestk):
 
     # Plot the PCA colored by Admix results
     pca_plotter(f'M3_{lowestk}', 'AdmixGroup', admix_colorpalette_list)
-
-    # Plot admix results as bargraph
-    cmd = sh.Command(f"{cwd}/distruct.py")
-    cmd(shlex.split(f"-K {lowestk} --input={admixoutdir+basename} --output={qfile+imgformat} --title=k{lowestk} --popfile={popfile}"))
     return
 
+def plot_admixture_bargraph():
+    # Plot admix results as bargraph
+    for ki in range(k+1):
+        try:
+            qfile = f'{admixoutdir+basename}.{ki}.Q'
+            popfile = f'{admixoutdir}popfile.txt'
+            keys = ['K', 'inputfile', 'output', 'title', 'popfile']
+            values = [f"{ki}", f"{admixoutdir+basename}", f"{qfile+imgformat}", f"{ki}", f"{popfile}"]
+            paramdict = dict(zip(keys, values))
+            distructor(paramdict)
+        except FileNotFoundError:
+            pass
+    return
 
 def raxer(pwd, basename, bs):
     # Print subprocess.check_output(shlex.split("raxmlHPC-PTHREADS-SSE3 -T 8 -f a -n %s -s %s.phy -x %d -N %d -m GTRCAT -p %d"%(basename,basename,random.randint(0,999999),bs,random.randint(0,999999))))
@@ -428,15 +441,12 @@ def controller(k):
     pcaaxis = PCAer()
     pca_prepper()
     pca_plotter('M1', metagroup, colorpalette_list)
-    pca_plotter('M1', colorby=None , colorpalette=sns.color_palette("Greys_r"))
+    ### pca_plotter('M1', colorby=None , colorpalette=sns.color_palette("Greys_r"))
     sample_map_plotter()
     lowestk = admix_set_up(k)
+    # lowestk=10
     plot_admixture(lowestk)
-    # manually override number of ancestral populations (k)
-    lowestk = 3
-    plot_admixture(lowestk)
-    # lowestk = 3
-    # plot_admixture(lowestk)
+    plot_admixture_bargraph()
     # raxer(pwd,basename,bs)
     directory_cleaner(pwd)
     return
